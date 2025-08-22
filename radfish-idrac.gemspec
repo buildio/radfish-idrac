@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.description = "Provides Dell iDRAC support for the Radfish unified Redfish client"
   spec.homepage = "https://github.com/buildio/radfish-idrac"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 2.7.0"
+  spec.required_ruby_version = ">= 3.1.0"
 
   spec.metadata["allowed_push_host"] = "https://rubygems.org"
   spec.metadata["homepage_uri"] = spec.homepage
@@ -26,7 +26,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "radfish", "~> 0.1"
-  spec.add_dependency "idrac", "~> 0.1"
+  spec.add_dependency "idrac", ">= 0.1"
   
   spec.add_development_dependency "rspec", "~> 3.0"
 end
