@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'radfish'
 require 'idrac'
 
 module Radfish
@@ -58,7 +59,7 @@ module Radfish
     # Power management - delegate to iDRAC client
     
     def power_status
-      @idrac_client.power_status
+      @idrac_client.get_power_state
     end
     
     def power_on

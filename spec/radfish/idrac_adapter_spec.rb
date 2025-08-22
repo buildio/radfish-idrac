@@ -23,7 +23,7 @@ RSpec.describe Radfish::IdracAdapter do
     end
 
     it "stores the iDRAC client" do
-      expect(adapter.idrac_client).to be_a(Idrac::Client)
+      expect(adapter.idrac_client).to be_a(IDRAC::Client)
     end
   end
 
@@ -34,10 +34,10 @@ RSpec.describe Radfish::IdracAdapter do
   end
 
   describe "delegation to iDRAC client" do
-    let(:idrac_client) { instance_double(Idrac::Client) }
+    let(:idrac_client) { instance_double(IDRAC::Client) }
 
     before do
-      allow(Idrac::Client).to receive(:new).and_return(idrac_client)
+      allow(IDRAC::Client).to receive(:new).and_return(idrac_client)
     end
 
     describe "#login" do
@@ -56,7 +56,7 @@ RSpec.describe Radfish::IdracAdapter do
 
     describe "#power_status" do
       it "delegates to the iDRAC client" do
-        expect(idrac_client).to receive(:power_status).and_return("On")
+        expect(idrac_client).to receive(:get_power_state).and_return("On")
         expect(adapter.power_status).to eq("On")
       end
     end
