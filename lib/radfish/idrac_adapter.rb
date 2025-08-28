@@ -127,6 +127,10 @@ module Radfish
       @idrac_client.power_consumption
     end
     
+    def power_consumption_watts
+      @idrac_client.get_power_usage_watts
+    end
+    
     # Storage
     
     def storage_controllers
