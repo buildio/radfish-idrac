@@ -12,6 +12,7 @@ module Radfish
     include Core::Boot
     include Core::Jobs
     include Core::Utility
+    include Core::Network
     
     attr_reader :idrac_client
     
@@ -307,6 +308,30 @@ module Radfish
     
     def license_info
       @idrac_client.license_info if @idrac_client.respond_to?(:license_info)
+    end
+    
+    # Network management
+    
+    def get_bmc_network
+      @idrac_client.get_bmc_network
+    end
+    
+    def set_bmc_network(ip_address: nil, subnet_mask: nil, gateway: nil, 
+                        dns_primary: nil, dns_secondary: nil, hostname: nil, 
+                        dhcp: false)
+      @idrac_client.set_bmc_network(
+        ip_address: ip_address,
+        subnet_mask: subnet_mask,
+        gateway: gateway,
+        dns_primary: dns_primary,
+        dns_secondary: dns_secondary,
+        hostname: hostname,
+        dhcp: dhcp
+      )
+    end
+    
+    def set_bmc_dhcp
+      @idrac_client.set_bmc_dhcp
     end
   end
   
