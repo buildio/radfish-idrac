@@ -302,9 +302,11 @@ module Radfish
       end
     end
     
-    def drives(controller_id)
-      # The iDRAC gem requires a controller_id
-      raise ArgumentError, "Controller ID is required" unless controller_id
+    def drives(controller)
+      # The iDRAC gem requires a controller identifier; derive it from the controller
+      raise ArgumentError, "Controller required" unless controller
+      controller_id = extract_controller_identifier(controller)
+      raise ArgumentError, "Controller identifier missing" unless controller_id
       
       drive_data = @idrac_client.drives(controller_id)
       
@@ -312,9 +314,11 @@ module Radfish
       drive_data.map { |drive| OpenStruct.new(drive) }
     end
     
-    def volumes(controller_id)
-      # The iDRAC gem requires a controller_id
-      raise ArgumentError, "Controller ID is required" unless controller_id
+    def volumes(controller)
+      # The iDRAC gem requires a controller identifier; derive it from the controller
+      raise ArgumentError, "Controller required" unless controller
+      controller_id = extract_controller_identifier(controller)
+      raise ArgumentError, "Controller identifier missing" unless controller_id
       
       volume_data = @idrac_client.volumes(controller_id)
       
@@ -351,6 +355,21 @@ module Radfish
           "drive_count" => 0,
           "volume_count" => 0
         }
+      end
+    end
+
+    private
+
+    def extract_controller_identifier(controller)
+      # Prefer vendor-native handle from adapter_data
+      raw = controller.respond_to?(:adapter_data) ? controller.adapter_data : controller
+      if defined?(OpenStruct) && raw.is_a?(OpenStruct)
+        table = raw.instance_variable_get(:@table)
+        table && (table[:"@odata.id"] || table["@odata.id"]) || controller.id
+      elsif raw.respond_to?(:[])
+        raw['@odata.id'] || raw[:'@odata.id'] || controller.id
+      else
+        controller.id
       end
     end
     
