@@ -302,16 +302,56 @@ module Radfish
       end
     end
     
-    def drives
-      @idrac_client.drives
+    def drives(controller_id)
+      # The iDRAC gem requires a controller_id
+      raise ArgumentError, "Controller ID is required" unless controller_id
+      
+      drive_data = @idrac_client.drives(controller_id)
+      
+      # Convert to OpenStruct for consistency
+      drive_data.map { |drive| OpenStruct.new(drive) }
     end
     
-    def volumes
-      @idrac_client.volumes
+    def volumes(controller_id)
+      # The iDRAC gem requires a controller_id
+      raise ArgumentError, "Controller ID is required" unless controller_id
+      
+      volume_data = @idrac_client.volumes(controller_id)
+      
+      # Convert to OpenStruct for consistency
+      volume_data.map { |volume| OpenStruct.new(volume) }
     end
     
     def storage_summary
-      @idrac_client.storage_summary
+      # The iDRAC gem doesn't have a storage_summary method
+      # We need to build it from controllers, drives, and volumes
+      begin
+        controllers = @idrac_client.controllers
+        total_drives = 0
+        total_volumes = 0
+        
+        controllers.each do |controller|
+          if controller["@odata.id"]
+            drives = @idrac_client.drives(controller["@odata.id"]) rescue []
+            volumes = @idrac_client.volumes(controller["@odata.id"]) rescue []
+            total_drives += drives.size
+            total_volumes += volumes.size
+          end
+        end
+        
+        {
+          "controller_count" => controllers.size,
+          "drive_count" => total_drives,
+          "volume_count" => total_volumes
+        }
+      rescue => e
+        puts "Error fetching storage summary: #{e.message}" if @debug
+        {
+          "controller_count" => 0,
+          "drive_count" => 0,
+          "volume_count" => 0
+        }
+      end
     end
     
     # Virtual Media
