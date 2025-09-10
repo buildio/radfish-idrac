@@ -62,13 +62,52 @@ RSpec.describe Radfish::IdracAdapter do
     end
 
     describe "#system_info" do
-      it "delegates to the iDRAC client" do
+      it "transforms iDRAC client data to radfish format" do
         system_data = { 
-          "ServiceTag" => "ABC123",
-          "Model" => "PowerEdge R640"
+          "service_tag" => "ABC123",
+          "model" => "PowerEdge R640",
+          "firmware_version" => "4.40.00.00",
+          "idrac_version" => "4.40.00.00",
+          "is_dell" => true
         }
         expect(idrac_client).to receive(:system_info).and_return(system_data)
-        expect(adapter.system_info).to eq(system_data)
+        
+        result = adapter.system_info
+        expect(result[:service_tag]).to eq("ABC123")
+        expect(result[:make]).to eq("Dell")
+        expect(result[:manufacturer]).to eq("Dell")
+        expect(result[:model]).to eq("R640")  # PowerEdge prefix stripped
+        expect(result[:serial]).to eq("ABC123")  # Dell uses service tag as serial
+      end
+    end
+    
+    describe "#service_tag" do
+      it "returns the service tag from iDRAC client" do
+        system_data = { "service_tag" => "ABC123" }
+        expect(idrac_client).to receive(:system_info).and_return(system_data)
+        expect(adapter.service_tag).to eq("ABC123")
+      end
+    end
+    
+    describe "#make" do
+      it "returns Dell" do
+        expect(adapter.make).to eq("Dell")
+      end
+    end
+    
+    describe "#model" do
+      it "returns the model with PowerEdge prefix stripped" do
+        system_data = { "model" => "PowerEdge R640" }
+        expect(idrac_client).to receive(:system_info).and_return(system_data)
+        expect(adapter.model).to eq("R640")
+      end
+    end
+    
+    describe "#serial" do
+      it "returns the service tag as serial" do
+        system_data = { "service_tag" => "ABC123" }
+        expect(idrac_client).to receive(:system_info).and_return(system_data)
+        expect(adapter.serial).to eq("ABC123")
       end
     end
 

@@ -186,6 +186,26 @@ module Radfish
       }.compact
     end
     
+    # Individual accessor methods for Core::System interface
+    def service_tag
+      @service_tag ||= @idrac_client.system_info["service_tag"]
+    end
+    
+    def make
+      "Dell"
+    end
+    
+    def model
+      @model ||= begin
+        model = @idrac_client.system_info["model"]
+        model&.gsub(/^PowerEdge\s+/i, '') if model  # Strip PowerEdge prefix
+      end
+    end
+    
+    def serial
+      @serial ||= @idrac_client.system_info["service_tag"]  # Dell uses service tag as serial
+    end
+    
     def cpus
       # The idrac gem returns a summary hash, but radfish expects an array of CPU objects
       # For Dell servers, typically all CPUs are identical, so we create objects based on the summary
@@ -240,7 +260,11 @@ module Radfish
       end
     end
     
-    # Note: iDRAC doesn't provide a temperatures method
+    def temperatures
+      # iDRAC doesn't provide a dedicated temperatures method
+      # Return empty array to satisfy the interface
+      []
+    end
     
     def psus
       # Convert hash array to OpenStruct objects for dot notation access
