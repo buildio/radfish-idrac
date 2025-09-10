@@ -372,6 +372,8 @@ module Radfish
         controller.id
       end
     end
+
+    public
     
     # Virtual Media
     
