@@ -331,6 +331,30 @@ module Radfish
       
       volume_data = @idrac_client.volumes(controller_id)
       
+      # Normalize key names for expected fields
+      volume_data.each do |v|
+        # Ensure raid_type/volume_type
+        v["raid_type"] ||= v["raid_level"] || v["RAIDType"]
+        v["volume_type"] ||= v["VolumeType"] if v["VolumeType"]
+        # Operations mapping
+        if v["Operations"]&.any?
+          v["operation_percent_complete"] ||= v["Operations"].first["PercentageComplete"]
+          v["operation_name"] ||= v["Operations"].first["OperationName"]
+        end
+        # Health normalization
+        v["health"] ||= v.dig("Status", "Health")
+        # OEM fallbacks
+        oem = v.dig("Oem", "Dell", "DellVirtualDisk") || v.dig("Oem", "Dell", "DellVolume")
+        if oem
+          v["lock_status"] ||= oem["LockStatus"]
+          v["stripe_size"] ||= oem["StripeSize"]
+          v["operation_name"] ||= oem["OperationName"]
+          v["operation_percent_complete"] ||= oem["OperationPercentComplete"]
+          v["write_cache_policy"] ||= oem["WriteCachePolicy"]
+          v["read_cache_policy"] ||= oem["ReadCachePolicy"]
+        end
+      end
+      
       # Convert to OpenStruct for consistency
       volume_data.map { |volume| OpenStruct.new(volume) }
     end
