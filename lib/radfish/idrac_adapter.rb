@@ -334,6 +334,33 @@ module Radfish
       # Convert to OpenStruct for consistency
       volume_data.map { |volume| OpenStruct.new(volume) }
     end
+
+    def volume_drives(volume)
+      # Resolve the physical drives that make up a volume
+      raise ArgumentError, "Volume required" unless volume
+      controller_id = extract_controller_identifier(volume.controller)
+      # Get all drives on the controller
+      drives = @idrac_client.drives(controller_id)
+      # The IDRAC client drive entries include 'odata_id'; volumes include Links.Drives as '@odata.id'
+      refs = nil
+      raw = volume.adapter_data
+      if raw.respond_to?(:[])
+        refs = raw['drives'] || raw[:drives]
+      elsif raw.respond_to?(:drives)
+        refs = raw.drives
+      end
+      return [] unless refs && refs.respond_to?(:map)
+      ref_ids = refs.map { |r| r['@odata.id'] || r[:'@odata.id'] }.compact
+      matched = drives.select do |d|
+        oid = if d.is_a?(Hash)
+                d['odata_id'] || d[:odata_id] || d['@odata.id'] || d[:'@odata.id']
+              elsif d.respond_to?(:[])
+                d['odata_id'] || d['@odata.id']
+              end
+        oid && ref_ids.include?(oid)
+      end
+      matched.map { |drive| OpenStruct.new(drive) }
+    end
     
     def storage_summary
       # The iDRAC gem doesn't have a storage_summary method
