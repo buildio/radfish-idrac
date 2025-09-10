@@ -294,6 +294,15 @@ module Radfish
       controller_data = @idrac_client.controllers
       
       controller_data.map do |controller|
+        # Promote battery status if available in OEM fields
+        begin
+          battery = controller.dig("Oem", "Dell", "DellControllerBattery")
+          if battery
+            controller["battery_status"] ||= (battery["PrimaryStatus"] || battery["RAIDState"]) 
+          end
+        rescue => e
+          debug "Battery status parse error: #{e.message}", 2, :yellow
+        end
         # Convert drives array to OpenStruct objects if present
         if controller["drives"]
           controller["drives"] = controller["drives"].map { |drive| OpenStruct.new(drive) }
