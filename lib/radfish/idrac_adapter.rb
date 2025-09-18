@@ -74,7 +74,7 @@ module Radfish
         while attempts < max_attempts
           sleep 2
           begin
-            status = power_state
+            status = power_status
             break if status == "On"
           rescue => e
             # BMC might be temporarily unavailable during power operations
@@ -98,7 +98,7 @@ module Radfish
         while attempts < max_attempts
           sleep 2
           begin
-            status = power_state
+            status = power_status
             break if status == "Off"
           rescue => e
             # BMC might be temporarily unavailable during power operations
@@ -134,7 +134,7 @@ module Radfish
         while attempts < max_attempts
           sleep 2
           begin
-            status = power_state
+            status = power_status
             went_down = true if status == "Off" && !went_down
             break if went_down && status == "On"
           rescue => e
@@ -694,6 +694,7 @@ module Radfish
       })
       
       # Apply the configuration
+      puts "Final SCP to be applied: #{JSON.pretty_generate(scp)}".cyan
       @idrac_client.set_system_configuration_profile(scp)
       
       { changes_made: true }
@@ -809,6 +810,46 @@ module Radfish
     
     def set_bmc_dhcp
       @idrac_client.set_bmc_dhcp
+    end
+    
+    # Storage management methods - controller encryption and virtual disk operations
+    
+    def enable_local_key_management(controller_id:, passphrase:, key_id:)
+      @idrac_client.enable_local_key_management(
+        controller_id: controller_id,
+        passphrase: passphrase,
+        key_id: key_id
+      )
+    end
+    
+    def disable_local_key_management(controller_id:)
+      @idrac_client.disable_local_key_management(controller_id: controller_id)
+    end
+    
+    def create_virtual_disk(**options)
+      @idrac_client.create_virtual_disk(**options)
+    end
+    
+    def delete_volume(volume_odata_id)
+      @idrac_client.delete_volume(volume_odata_id)
+    end
+    
+    # Additional storage helper methods available in iDRAC gem
+    
+    def controller_encryption_capable?
+      @idrac_client.controller_encryption_capable?
+    end
+    
+    def controller_encryption_enabled?
+      @idrac_client.controller_encryption_enabled?
+    end
+    
+    def all_seds?
+      @idrac_client.all_seds?
+    end
+    
+    def sed_ready?
+      @idrac_client.sed_ready?
     end
   end
   
