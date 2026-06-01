@@ -445,7 +445,7 @@ module Radfish
       # Default to "CD" for iDRAC if not specified
       device ||= "CD"
       @idrac_client.insert_virtual_media(iso_url, device: device)
-    rescue Idrac::Error => e
+    rescue IDRAC::Error => e
       # Translate iDRAC errors to Radfish errors with context
       error_message = e.message
       
@@ -468,7 +468,7 @@ module Radfish
     
     def eject_virtual_media(device: "CD")
       @idrac_client.eject_virtual_media(device: device)
-    rescue Idrac::Error => e
+    rescue IDRAC::Error => e
       if e.message.include?("not found") || e.message.include?("does not exist")
         raise Radfish::VirtualMediaNotFoundError, "Virtual media device not found: #{e.message}"
       else

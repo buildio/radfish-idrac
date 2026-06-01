@@ -118,5 +118,49 @@ RSpec.describe Radfish::IdracAdapter do
         expect(adapter.virtual_media).to eq(media_data)
       end
     end
+
+    describe "#insert_virtual_media" do
+      it "delegates to the iDRAC client" do
+        expect(idrac_client).to receive(:insert_virtual_media).with("http://example.com/test.iso", device: "CD")
+        adapter.insert_virtual_media("http://example.com/test.iso")
+      end
+
+      it "rescues IDRAC::Error (not Idrac::Error) and translates to Radfish error" do
+        expect(idrac_client).to receive(:insert_virtual_media).and_raise(IDRAC::Error, "connection refused")
+        expect { adapter.insert_virtual_media("http://example.com/test.iso") }
+          .to raise_error(Radfish::VirtualMediaConnectionError, /BMC cannot reach/)
+      end
+
+      it "translates timeout errors" do
+        expect(idrac_client).to receive(:insert_virtual_media).and_raise(IDRAC::Error, "operation timeout")
+        expect { adapter.insert_virtual_media("http://example.com/test.iso") }
+          .to raise_error(Radfish::TaskTimeoutError, /timed out/)
+      end
+
+      it "translates generic iDRAC errors to VirtualMediaError" do
+        expect(idrac_client).to receive(:insert_virtual_media).and_raise(IDRAC::Error, "something unexpected")
+        expect { adapter.insert_virtual_media("http://example.com/test.iso") }
+          .to raise_error(Radfish::VirtualMediaError, "something unexpected")
+      end
+    end
+
+    describe "#eject_virtual_media" do
+      it "delegates to the iDRAC client" do
+        expect(idrac_client).to receive(:eject_virtual_media).with(device: "CD")
+        adapter.eject_virtual_media
+      end
+
+      it "rescues IDRAC::Error (not Idrac::Error) and translates to Radfish error" do
+        expect(idrac_client).to receive(:eject_virtual_media).and_raise(IDRAC::Error, "device not found")
+        expect { adapter.eject_virtual_media }
+          .to raise_error(Radfish::VirtualMediaNotFoundError, /not found/)
+      end
+
+      it "translates generic iDRAC errors to VirtualMediaError" do
+        expect(idrac_client).to receive(:eject_virtual_media).and_raise(IDRAC::Error, "unexpected error")
+        expect { adapter.eject_virtual_media }
+          .to raise_error(Radfish::VirtualMediaError, /Failed to eject/)
+      end
+    end
   end
 end
