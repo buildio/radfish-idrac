@@ -87,9 +87,15 @@ module Radfish
       result
     end
     
+    # Reset types that restart the host. These must never be sent through #power_off: the wait for
+    # "Off" cannot succeed, and the iDRAC gem reads that failure as a stuck shutdown.
+    RESTART_TYPES = %w[ForceRestart GracefulRestart PowerCycle].freeze
+
     def power_off(type: "GracefulShutdown", wait: true)
+      raise ArgumentError, "#{type} restarts the host; use #reboot" if RESTART_TYPES.include?(type)
+
       # Use the type parameter directly - it already uses Redfish standard values
-      result = @idrac_client.power_off(kind: type)
+      result = @idrac_client.power_off(kind: type, wait: wait)
       
       if wait && result
         # Wait for power off to complete
@@ -112,17 +118,15 @@ module Radfish
     end
     
     def reboot(type: "GracefulRestart", wait: true)
-      # Use the type parameter - iDRAC's power_off can handle restart types
+      # A restart goes to the restart action. Routing it through power_off left iDRAC8 hosts
+      # powered down: the wait for "Off" failed and the iDRAC gem escalated to ForceOff.
       begin
-        result = @idrac_client.power_off(kind: type)
+        result = @idrac_client.reboot(kind: type, wait: wait)
       rescue => e
-        # If graceful restart fails, fall back to force restart
-        if type == "GracefulRestart"
-          debug "Graceful restart failed, using force restart", 1, :yellow
-          result = @idrac_client.reboot  # This is ForceRestart
-        else
-          raise e
-        end
+        # iDRAC8 has no GracefulRestart in its allowable reset types.
+        raise e unless type == "GracefulRestart"
+        debug "Graceful restart failed, using force restart", 1, :yellow
+        result = @idrac_client.reboot(kind: "ForceRestart", wait: wait)
       end
       
       if wait && result

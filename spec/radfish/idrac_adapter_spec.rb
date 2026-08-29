@@ -111,6 +111,50 @@ RSpec.describe Radfish::IdracAdapter do
       end
     end
 
+    # A restart is not a power off. Routed through the iDRAC gem's power_off, a ForceRestart waits
+    # for PowerState "Off" it will never reach, and the failed wait escalates to ForceOff — which
+    # is how an iDRAC8 node was left powered down for 22 minutes.
+    describe "#reboot" do
+      it "sends a restart, never a power off" do
+        expect(idrac_client).not_to receive(:power_off)
+        expect(idrac_client).to receive(:reboot).with(kind: "ForceRestart", wait: false).and_return(true)
+        adapter.reboot(type: "ForceRestart", wait: false)
+      end
+
+      it "passes the caller's wait through instead of dropping it" do
+        expect(idrac_client).to receive(:reboot).with(kind: "ForceRestart", wait: true).and_return(false)
+        adapter.reboot(type: "ForceRestart", wait: true)
+      end
+
+      # iDRAC8 has no GracefulRestart among its allowable reset types.
+      it "falls back to ForceRestart when GracefulRestart is refused, and still does not power off" do
+        expect(idrac_client).not_to receive(:power_off)
+        expect(idrac_client).to receive(:reboot).with(kind: "GracefulRestart", wait: false)
+                                                .and_raise(IDRAC::Error, "not allowed")
+        expect(idrac_client).to receive(:reboot).with(kind: "ForceRestart", wait: false).and_return(true)
+        adapter.reboot(type: "GracefulRestart", wait: false)
+      end
+
+      it "re-raises a failure of a non-graceful restart rather than powering the host off" do
+        expect(idrac_client).not_to receive(:power_off)
+        expect(idrac_client).to receive(:reboot).with(kind: "ForceRestart", wait: false)
+                                                .and_raise(IDRAC::Error, "boom")
+        expect { adapter.reboot(type: "ForceRestart", wait: false) }.to raise_error(IDRAC::Error, "boom")
+      end
+    end
+
+    describe "#power_off" do
+      it "refuses a restart type instead of powering the host down" do
+        expect(idrac_client).not_to receive(:power_off)
+        expect { adapter.power_off(type: "ForceRestart") }.to raise_error(ArgumentError, /use #reboot/)
+      end
+
+      it "passes a shutdown type and the caller's wait to the iDRAC client" do
+        expect(idrac_client).to receive(:power_off).with(kind: "GracefulShutdown", wait: false).and_return(true)
+        adapter.power_off(type: "GracefulShutdown", wait: false)
+      end
+    end
+
     describe "#virtual_media" do
       it "delegates to the iDRAC client" do
         media_data = []
