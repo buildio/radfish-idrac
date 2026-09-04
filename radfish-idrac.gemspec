@@ -26,7 +26,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "radfish", "~> 0.1"
-  spec.add_dependency "idrac", "~> 0.10", ">= 0.10.4"
+  spec.add_dependency "idrac", "~> 0.10", ">= 0.10.7"
   
   spec.add_development_dependency "rspec", "~> 3.0"
 end

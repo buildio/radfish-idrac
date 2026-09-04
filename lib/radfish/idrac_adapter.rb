@@ -557,7 +557,48 @@ module Radfish
     def boot_to_bios_setup(enabled: "Once", mode: nil)
       @idrac_client.boot_to_bios_setup(enabled: enabled, mode: mode)
     end
-    
+
+    # Stale UEFI boot placeholders and their disable, moved out of the app's raw Redfish.
+    # Both delegate straight to the iDRAC client, which owns the BootSources mechanics.
+    def stale_uefi_boot_entries(**opts)
+      @idrac_client.stale_uefi_boot_entries(**opts)
+    end
+
+    def disable_boot_entries(**opts)
+      @idrac_client.disable_boot_entries(**opts)
+    end
+
+    # Live BMC power read, normalized. Replaces the app reach-through that dug the iDRAC client
+    # out of the adapter to call get_power_state.
+    def power_state
+      @idrac_client.get_power_state
+    end
+
+    # Normalized Redfish BootProgress (nil when the BMC omits it, e.g. iDRAC8).
+    def boot_progress
+      @idrac_client.boot_progress
+    end
+
+    # LC068 anticipate-and-drain, exposed for callers that schedule their own config job.
+    def drain_pending_config_jobs!
+      @idrac_client.drain_pending_config_jobs!
+    end
+
+    # Per-model ceiling (seconds) for how long a host may take to reach a BootProgress state after
+    # a power-on POST before Radfish#wait_for_boot_progress calls it a stall. These POST envelopes
+    # are model-specific -- the EPYC R6525/R7525 POST far longer than the R630/R640 -- so they live
+    # here in the adapter; the neutral wait loop in radfish reads them.
+    BOOT_PROGRESS_CEILINGS = {
+      /R6525|R7525/i => 1200,
+      /R630|R640/i   => 900
+    }.freeze
+    DEFAULT_BOOT_PROGRESS_CEILING = 900
+
+    def boot_progress_ceiling(_target = :os_running)
+      m = model.to_s
+      BOOT_PROGRESS_CEILINGS.find { |re, _| m.match?(re) }&.last || DEFAULT_BOOT_PROGRESS_CEILING
+    end
+
     # PCI Devices
     
     def pci_devices
