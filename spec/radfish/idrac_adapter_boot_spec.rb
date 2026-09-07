@@ -43,6 +43,28 @@ RSpec.describe Radfish::IdracAdapter, "boot/power delegation moved out of the ap
     end
   end
 
+  describe "#set_one_time_cd_boot" do
+    it "delegates, passing through the reboot option" do
+      expect(idrac_client).to receive(:set_one_time_cd_boot).with(reboot: true).and_return(true)
+      expect(adapter.set_one_time_cd_boot(reboot: true)).to eq(true)
+    end
+  end
+
+  describe "#wait_config_job" do
+    it "delegates the job id and options to the iDRAC client" do
+      expect(idrac_client).to receive(:wait_config_job).with("JID_1", timeout: 300).and_return("Completed")
+      expect(adapter.wait_config_job("JID_1", timeout: 300)).to eq("Completed")
+    end
+  end
+
+  describe "#set_system_configuration_profile" do
+    it "delegates the SCP and options to the iDRAC client" do
+      scp = { "BIOS.Setup.1-1" => { "BootMode" => "Uefi" } }
+      expect(idrac_client).to receive(:set_system_configuration_profile).with(scp, reboot: true).and_return("JID_2")
+      expect(adapter.set_system_configuration_profile(scp, reboot: true)).to eq("JID_2")
+    end
+  end
+
   describe "#boot_progress_ceiling" do
     it "gives the EPYC R6525/R7525 a longer POST ceiling than the R630/R640" do
       allow(idrac_client).to receive(:system_info).and_return("model" => "PowerEdge R6525")

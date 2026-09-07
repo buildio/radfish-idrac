@@ -584,6 +584,21 @@ module Radfish
       @idrac_client.drain_pending_config_jobs!
     end
 
+    # One-time CD/DVD boot, delegated. The iDRAC client owns the BootSourceOverride mechanics.
+    def set_one_time_cd_boot(**opts)
+      @idrac_client.set_one_time_cd_boot(**opts)
+    end
+
+    # Wait on a Lifecycle Controller config job by id.
+    def wait_config_job(jid, **opts)
+      @idrac_client.wait_config_job(jid, **opts)
+    end
+
+    # Public delegate for applying a System Configuration Profile; also called internally by ensure_sensible_bios!.
+    def set_system_configuration_profile(scp, **opts)
+      @idrac_client.set_system_configuration_profile(scp, **opts)
+    end
+
     # Per-model ceiling (seconds) for how long a host may take to reach a BootProgress state after
     # a power-on POST before Radfish#wait_for_boot_progress calls it a stall. These POST envelopes
     # are model-specific -- the EPYC R6525/R7525 POST far longer than the R630/R640 -- so they live
