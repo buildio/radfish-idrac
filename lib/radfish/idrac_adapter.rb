@@ -584,12 +584,15 @@ module Radfish
       @idrac_client.drain_pending_config_jobs!
     end
 
-    # One-time CD/DVD boot, delegated. The iDRAC client owns the BootSourceOverride mechanics.
+    # Dell one-time boot to the virtual CD via an SCP import. Drains any pending LC config job first
+    # (a stale one trips LC068), then imports ServerBoot.1#BootOnce + FirstBootDevice=VCD-DVD. This is
+    # the Dell path; the plain-Redfish set_one_time_boot_to_virtual_media stays for other vendors.
     def set_one_time_cd_boot(**opts)
       @idrac_client.set_one_time_cd_boot(**opts)
     end
 
-    # Wait on a Lifecycle Controller config job by id.
+    # Poll a Lifecycle Controller config job (e.g. the BIOS config job a BootSources change schedules)
+    # to a terminal state; returns the state string, or nil on timeout (never raises).
     def wait_config_job(jid, **opts)
       @idrac_client.wait_config_job(jid, **opts)
     end
