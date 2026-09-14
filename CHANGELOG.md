@@ -8,15 +8,23 @@
   never touched. `pending_config_jobs` exposes the read-only view of what is
   still holding the queue. Both need the idrac release that carries them.
   (#7)
-- The iDRAC job-queue conflict (409 / LC068 "a configuration job is already
-  scheduled", "the maximum number of jobs is reached") is now recovered HERE,
-  not by callers: the commands that schedule a Lifecycle Controller config job
-  run inside `with_job_queue_retry`, which frees the finished slots with
+- An iDRAC job-queue conflict is now recovered HERE, not by callers: the
+  commands that schedule a Lifecycle Controller config job run inside
+  `with_job_queue_retry`, which frees the finished slots with
   `clear_completed_jobs` and runs the command once more. An application does
-  not have to know the iDRAC has a job queue. A 409 that is not about the
-  queue -- a power action answering "already in that state" -- is untouched,
-  and if the retry hits the same conflict the caller gets the original error.
-  (#7)
+  not have to know the iDRAC has a job queue. If the retry hits the same
+  conflict the caller gets the original error. (#7)
+- **The trigger is the 409 status on those commands, not the message text.**
+  Each wrapped command schedules a config job, and a config-job POST or SCP
+  import answers 409 when the queue will not take another one, so a 409 there
+  is a queue conflict by construction. This matters: the one 409 we have
+  captured (n003, iDRAC9, buildio/build#1974) reads in full "Failed with
+  status 409: A general error has occurred" -- no job, no queue, no message
+  id. A recovery gated on wording would not have fired on it. Dell's known
+  wordings (LC068 and the rest) are kept only as a secondary signal, for the
+  SCP-import path that can report the conflict in a result hash carrying no
+  status code. Commands outside the seam are untouched, so a power action
+  answering 409 for "already in that state" still raises as before.
 - `free_job_queue_slots!` frees slots without cancelling anything: a job that
   is Running is polled to a terminal state (`wait_config_job`, never a blind
   sleep -- a BIOS config job runs during the host's POST and takes minutes)

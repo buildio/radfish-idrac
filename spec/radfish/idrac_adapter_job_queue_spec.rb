@@ -13,6 +13,10 @@ RSpec.describe Radfish::IdracAdapter, "iDRAC job queue" do
   let(:adapter) { described_class.new(host: "h", username: "u", password: "p", port: 443, verify_ssl: false) }
   let(:idrac_client) { double("IDRAC::Client") }
 
+  # The one 409 we have actually captured: us-east-1z n003, iDRAC9, buildio/build#1974 -- the
+  # incident this whole change comes from. Dell's generic 409 body. It names no job, no queue and no
+  # message id, which is exactly why the recovery is keyed on the status and not on the wording.
+  let(:n003_409) { IDRAC::Error.new("Failed with status 409: A general error has occurred") }
   let(:lc068) { IDRAC::Error.new("Failed with status 409: a configuration job is already scheduled (IDRAC.2.9.LC068)") }
   let(:queue_full_result) { { status: :failed, error: "Failed importing SCP: the maximum number of jobs is reached" } }
 
@@ -65,6 +69,14 @@ RSpec.describe Radfish::IdracAdapter, "iDRAC job queue" do
   describe "the 409 / LC068 recovery" do
     before { allow(idrac_client).to receive(:pending_config_jobs).and_return([]) }
 
+    it "fires on the real n003 409, which explains nothing at all" do
+      expect(idrac_client).to receive(:set_system_configuration_profile).and_raise(n003_409).ordered
+      expect(idrac_client).to receive(:clear_completed_jobs).and_return(["JID_DONE"]).ordered
+      expect(idrac_client).to receive(:set_system_configuration_profile).and_return({ status: :success }).ordered
+
+      expect(adapter.set_system_configuration_profile({})[:status]).to eq(:success)
+    end
+
     it "clears finished jobs and retries the command once, so the caller never sees the conflict" do
       expect(idrac_client).to receive(:set_system_configuration_profile).and_raise(lc068).ordered
       expect(idrac_client).to receive(:clear_completed_jobs).and_return(["JID_DONE"]).ordered
@@ -97,12 +109,20 @@ RSpec.describe Radfish::IdracAdapter, "iDRAC job queue" do
       expect { adapter.set_system_configuration_profile({}) }.to raise_error(IDRAC::Error, /LC068/)
     end
 
-    it "leaves a 409 that is not about the job queue alone" do
-      not_a_queue_problem = IDRAC::Error.new("Failed with status 409: the server is already powered on")
-      expect(idrac_client).to receive(:set_system_configuration_profile).once.and_raise(not_a_queue_problem)
+    it "leaves an error that is not a 409 alone" do
+      not_a_conflict = IDRAC::Error.new("Failed with status 500: the iDRAC is resetting")
+      expect(idrac_client).to receive(:set_system_configuration_profile).once.and_raise(not_a_conflict)
       expect(idrac_client).not_to receive(:clear_completed_jobs)
 
-      expect { adapter.set_system_configuration_profile({}) }.to raise_error(/already powered on/)
+      expect { adapter.set_system_configuration_profile({}) }.to raise_error(/iDRAC is resetting/)
+    end
+
+    it "does not reach commands outside the seam: a power 409 means 'already in that state'" do
+      already_on = IDRAC::Error.new("Failed with status 409: the server is already powered on")
+      expect(idrac_client).to receive(:power_on).once.and_raise(already_on)
+      expect(idrac_client).not_to receive(:clear_completed_jobs)
+
+      expect { adapter.power_on }.to raise_error(/already powered on/)
     end
 
     it "surfaces a genuinely different second failure as itself" do

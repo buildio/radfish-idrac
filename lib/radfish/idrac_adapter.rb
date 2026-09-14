@@ -686,19 +686,32 @@ module Radfish
     # --- iDRAC job-queue conflicts (409 / LC068) -------------------------------------------------
     #
     # An application must not have to know that the iDRAC has a job queue, so the recovery lives
-    # here and not in callers. The commands below that schedule a Lifecycle Controller config job
-    # run inside with_job_queue_retry.
+    # here and not in callers. The commands that schedule a Lifecycle Controller config job run
+    # inside with_job_queue_retry, and a 409 from one of THOSE is what triggers it.
 
     # How long to poll a config job that is still Running before giving up on it (seconds). A BIOS
     # config job is applied during the host's POST, so it takes minutes; a short wait only fails
     # slower. Pass job_queue_wait: 0 to the constructor to never wait.
     JOB_QUEUE_WAIT = 900
 
-    # A 409 whose message says the job queue is full, or already holds a config job. LC068 is Dell's
-    # "a configuration job is already created/scheduled". A 409 that does NOT say this is not a
-    # queue problem -- power actions answer 409 for "the host is already in that state" -- and is
-    # never retried here.
-    JOB_QUEUE_CONFLICT = /
+    # THE TRIGGER IS THE STATUS, NOT THE WORDING. Every command wrapped below schedules a Lifecycle
+    # Controller config job, and a config-job POST or SCP import answers 409 when the queue will not
+    # take another one -- there is no other plausible reading of a 409 from those commands. So a 409
+    # is a queue conflict by construction, and nothing here depends on Dell explaining itself.
+    #
+    # It has to work this way: the one 409 we have actually captured (n003, iDRAC9, buildio/build#1974)
+    # reads in full "Failed with status 409: A general error has occurred". It names no job, no queue
+    # and no message id. A recovery gated on wording would not have fired on the only real failure we
+    # have seen.
+    #
+    # Commands that are NOT wrapped are unaffected: a power action answers 409 for "the host is
+    # already in that state", and nothing routes it through here.
+    CONFLICT_STATUS = /\b409\b/
+
+    # Secondary signal only, never the gate. An SCP import can report the conflict in its
+    # { status: :failed, error: } result instead of raising, and that text may carry Dell's wording
+    # while carrying no status code at all. These are the wordings iDRAC is known to use.
+    JOB_QUEUE_MESSAGES = /
       LC068
       | job \s queue \s is \s full
       | (?:maximum \s number \s of | too \s many) \s jobs
@@ -754,13 +767,15 @@ module Radfish
     end
 
     # True when +outcome+ is a job-queue conflict, whether it arrived as a raised error or as the
-    # { status: :failed, error: } hash an SCP import returns instead of raising.
+    # { status: :failed, error: } hash an SCP import returns instead of raising. A 409 is enough on
+    # its own (see CONFLICT_STATUS); the known wordings catch the result-hash form that reports the
+    # conflict without a status code.
     def job_queue_conflict?(outcome)
       text = case outcome
              when StandardError then outcome.message
              when Hash then outcome[:status] == :failed ? "#{outcome[:error]} #{outcome[:message]}" : nil
-             end
-      text.to_s.match?(JOB_QUEUE_CONFLICT)
+             end.to_s
+      text.match?(CONFLICT_STATUS) || text.match?(JOB_QUEUE_MESSAGES)
     end
 
     def capture_failure
