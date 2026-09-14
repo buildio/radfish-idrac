@@ -33,6 +33,8 @@ module Radfish
         retry_delay: options[:retry_delay] || 1,
         host_header: options[:host_header]
       )
+
+      @job_queue_wait = options.fetch(:job_queue_wait, JOB_QUEUE_WAIT)
     end
     
     def vendor
@@ -565,7 +567,7 @@ module Radfish
     end
 
     def disable_boot_entries(**opts)
-      @idrac_client.disable_boot_entries(**opts)
+      with_job_queue_retry("Boot-source config job") { @idrac_client.disable_boot_entries(**opts) }
     end
 
     # Live BMC power read, normalized. Replaces the app reach-through that dug the iDRAC client
@@ -588,7 +590,7 @@ module Radfish
     # (a stale one trips LC068), then imports ServerBoot.1#BootOnce + FirstBootDevice=VCD-DVD. This is
     # the Dell path; the plain-Redfish set_one_time_boot_to_virtual_media stays for other vendors.
     def set_one_time_cd_boot(**opts)
-      @idrac_client.set_one_time_cd_boot(**opts)
+      with_job_queue_retry("One-time vCD boot") { @idrac_client.set_one_time_cd_boot(**opts) }
     end
 
     # Poll a Lifecycle Controller config job (e.g. the BIOS config job a BootSources change schedules)
@@ -599,7 +601,7 @@ module Radfish
 
     # Public delegate for applying a System Configuration Profile; also called internally by ensure_sensible_bios!.
     def set_system_configuration_profile(scp, **opts)
-      @idrac_client.set_system_configuration_profile(scp, **opts)
+      with_job_queue_retry("SCP import") { @idrac_client.set_system_configuration_profile(scp, **opts) }
     end
 
     # Per-model ceiling (seconds) for how long a host may take to reach a BootProgress state after
@@ -656,13 +658,121 @@ module Radfish
       @idrac_client.cancel_job(job_id)
     end
     
+    # Delete EVERY job, whatever its state: a Running or Scheduled job is cancelled with the rest.
+    # This is not queue hygiene -- see clear_completed_jobs. Keep it for the rare case where
+    # cancelling work that has not finished is what is actually intended.
     def clear_jobs!
       @idrac_client.clear_jobs!
     end
-    
+
+    # Delete only the jobs that have FINISHED and return the ids removed. This is the safe queue
+    # hygiene Radfish::Core::Jobs declares: a finished job still holds an iDRAC job-queue slot, so a
+    # queue full of finished jobs makes the next config job fail with 409/LC068 while nothing is
+    # actually running. Nothing that has not finished is ever touched.
+    def clear_completed_jobs
+      @idrac_client.clear_completed_jobs
+    end
+
+    # The jobs that have NOT finished, read-only: why a queue is blocked, before deciding what may
+    # be done about it.
+    def pending_config_jobs
+      @idrac_client.pending_config_jobs
+    end
+
     def jobs_summary
       jobs
     end
+
+    # --- iDRAC job-queue conflicts (409 / LC068) -------------------------------------------------
+    #
+    # An application must not have to know that the iDRAC has a job queue, so the recovery lives
+    # here and not in callers. The commands below that schedule a Lifecycle Controller config job
+    # run inside with_job_queue_retry.
+
+    # How long to poll a config job that is still Running before giving up on it (seconds). A BIOS
+    # config job is applied during the host's POST, so it takes minutes; a short wait only fails
+    # slower. Pass job_queue_wait: 0 to the constructor to never wait.
+    JOB_QUEUE_WAIT = 900
+
+    # A 409 whose message says the job queue is full, or already holds a config job. LC068 is Dell's
+    # "a configuration job is already created/scheduled". A 409 that does NOT say this is not a
+    # queue problem -- power actions answer 409 for "the host is already in that state" -- and is
+    # never retried here.
+    JOB_QUEUE_CONFLICT = /
+      LC068
+      | job \s queue \s is \s full
+      | (?:maximum \s number \s of | too \s many) \s jobs
+      | configuration \s job \s is \s already \s (?:created|scheduled|running)
+      | pending \s configuration \s job
+    /xi
+
+    attr_accessor :job_queue_wait
+
+    # Free iDRAC job-queue slots WITHOUT cancelling anything. A job that is Running finishes by
+    # itself, so poll it to a terminal state (wait_config_job -- never a blind sleep) and then
+    # delete it with the other finished jobs. A Scheduled or New job is not waited on: it only runs
+    # at the next host boot, and ordering that boot is the caller's decision, not this method's. It
+    # is never deleted either. Returns the ids removed.
+    def free_job_queue_slots!(wait: job_queue_wait)
+      if wait.to_i > 0
+        running = @idrac_client.pending_config_jobs.select { |j| j["JobState"].to_s == "Running" }
+        running.each do |j|
+          puts "Waiting for the running config job #{j['Id']} to finish before freeing queue slots...".yellow
+          @idrac_client.wait_config_job(j["Id"], timeout: wait)
+        end
+      end
+      @idrac_client.clear_completed_jobs
+    end
+
+    # Run a command that schedules a Lifecycle Controller config job, and recover ONCE from a
+    # blocked job queue: free the finished slots (free_job_queue_slots!, which cancels nothing) and
+    # run the command again. Anything that is not a queue conflict passes straight through
+    # untouched. If the retry reports the same conflict the caller gets the FIRST error, the one
+    # that describes the conflict; a genuinely different second failure is surfaced as itself rather
+    # than hidden. Only wraps commands that are safe to run twice.
+    def with_job_queue_retry(label)
+      first = capture_failure { yield }
+      return surface(first) unless job_queue_conflict?(first) && !@recovering_job_queue
+
+      begin
+        @recovering_job_queue = true
+        puts "#{label} hit a blocked iDRAC job queue; clearing finished jobs and retrying once.".yellow
+        freed = free_job_queue_slots!
+        if freed.empty?
+          blocked = @idrac_client.pending_config_jobs.map { |j| "#{j['Id']}=#{j['JobState']}" }
+          puts "No finished job to clear; the queue is held by #{blocked.join(', ')}. Nothing was " \
+               "cancelled -- drain_pending_config_jobs! does that, and only when it is intended.".yellow if blocked.any?
+          return surface(first)
+        end
+        second = capture_failure { yield }
+        return surface(second) unless job_queue_conflict?(second)
+        puts "#{label} still reports a blocked job queue after clearing #{freed.size} finished job(s).".red
+        surface(first)
+      ensure
+        @recovering_job_queue = false
+      end
+    end
+
+    # True when +outcome+ is a job-queue conflict, whether it arrived as a raised error or as the
+    # { status: :failed, error: } hash an SCP import returns instead of raising.
+    def job_queue_conflict?(outcome)
+      text = case outcome
+             when StandardError then outcome.message
+             when Hash then outcome[:status] == :failed ? "#{outcome[:error]} #{outcome[:message]}" : nil
+             end
+      text.to_s.match?(JOB_QUEUE_CONFLICT)
+    end
+
+    def capture_failure
+      yield
+    rescue StandardError => e
+      e
+    end
+
+    def surface(outcome)
+      outcome.is_a?(StandardError) ? raise(outcome) : outcome
+    end
+    private :capture_failure, :surface
     
     # BMC Management
     
@@ -686,7 +796,7 @@ module Radfish
     end
     
     def ensure_uefi_boot
-      @idrac_client.ensure_uefi_boot
+      with_job_queue_retry("UEFI boot-mode config job") { @idrac_client.ensure_uefi_boot }
     end
     
     def set_one_time_boot_to_virtual_media
@@ -696,7 +806,7 @@ module Radfish
     
     def set_boot_order_hd_first
       # Use iDRAC's existing method for setting boot order to HD first
-      @idrac_client.set_boot_order_hd_first
+      with_job_queue_retry("Boot-order config job") { @idrac_client.set_boot_order_hd_first }
     end
     
     def ensure_sensible_bios!(options = {})
@@ -758,7 +868,7 @@ module Radfish
       
       # Apply the configuration
       puts "Final SCP to be applied: #{JSON.pretty_generate(scp)}".cyan
-      @idrac_client.set_system_configuration_profile(scp)
+      with_job_queue_retry("BIOS SCP import") { @idrac_client.set_system_configuration_profile(scp) }
       
       { changes_made: true }
     end
