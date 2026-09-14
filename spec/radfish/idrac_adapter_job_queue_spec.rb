@@ -16,7 +16,18 @@ RSpec.describe Radfish::IdracAdapter, "iDRAC job queue" do
   # The one 409 we have actually captured: us-east-1z n003, iDRAC9, buildio/build#1974 -- the
   # incident this whole change comes from. Dell's generic 409 body. It names no job, no queue and no
   # message id, which is exactly why the recovery is keyed on the status and not on the wording.
+  #
+  # As written here the error reports no #status, so this is also the version-skew case: an older
+  # idrac gem whose IDRAC::Error carries no status at all, where the 409 can only be read out of the
+  # message.
   let(:n003_409) { IDRAC::Error.new("Failed with status 409: A general error has occurred") }
+
+  # The same failure from an idrac gem that carries the status as data. The message deliberately
+  # holds no "409" and no known wording, so only the attribute can fire the recovery. Built by
+  # stubbing rather than by IDRAC::Error.new(status:) so the spec runs against either gem version.
+  let(:structured_409) do
+    IDRAC::Error.new("A general error has occurred").tap { |e| allow(e).to receive(:status).and_return(409) }
+  end
   let(:lc068) { IDRAC::Error.new("Failed with status 409: a configuration job is already scheduled (IDRAC.2.9.LC068)") }
   let(:queue_full_result) { { status: :failed, error: "Failed importing SCP: the maximum number of jobs is reached" } }
 
@@ -69,7 +80,15 @@ RSpec.describe Radfish::IdracAdapter, "iDRAC job queue" do
   describe "the 409 / LC068 recovery" do
     before { allow(idrac_client).to receive(:pending_config_jobs).and_return([]) }
 
-    it "fires on the real n003 409, which explains nothing at all" do
+    it "reads the status off the error as data, with nothing useful in the message" do
+      expect(idrac_client).to receive(:set_system_configuration_profile).and_raise(structured_409).ordered
+      expect(idrac_client).to receive(:clear_completed_jobs).and_return(["JID_DONE"]).ordered
+      expect(idrac_client).to receive(:set_system_configuration_profile).and_return({ status: :success }).ordered
+
+      expect(adapter.set_system_configuration_profile({})[:status]).to eq(:success)
+    end
+
+    it "falls back to the message when the idrac gem reports no status (the real n003 409)" do
       expect(idrac_client).to receive(:set_system_configuration_profile).and_raise(n003_409).ordered
       expect(idrac_client).to receive(:clear_completed_jobs).and_return(["JID_DONE"]).ordered
       expect(idrac_client).to receive(:set_system_configuration_profile).and_return({ status: :success }).ordered
@@ -109,8 +128,9 @@ RSpec.describe Radfish::IdracAdapter, "iDRAC job queue" do
       expect { adapter.set_system_configuration_profile({}) }.to raise_error(IDRAC::Error, /LC068/)
     end
 
-    it "leaves an error that is not a 409 alone" do
+    it "leaves an error that is not a 409 alone, by status as well as by text" do
       not_a_conflict = IDRAC::Error.new("Failed with status 500: the iDRAC is resetting")
+      allow(not_a_conflict).to receive(:status).and_return(500)
       expect(idrac_client).to receive(:set_system_configuration_profile).once.and_raise(not_a_conflict)
       expect(idrac_client).not_to receive(:clear_completed_jobs)
 

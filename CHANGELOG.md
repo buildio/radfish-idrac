@@ -14,7 +14,10 @@
   `clear_completed_jobs` and runs the command once more. An application does
   not have to know the iDRAC has a job queue. If the retry hits the same
   conflict the caller gets the original error. (#7)
-- **The trigger is the 409 status on those commands, not the message text.**
+- **The trigger is the 409 status on those commands, not the message text**,
+  and the status is read as DATA: `IDRAC::Error#status`, which the matching
+  idrac release now carries. The `/\b409\b/` message match remains only as a
+  fallback for an older idrac gem that does not expose it.
   Each wrapped command schedules a config job, and a config-job POST or SCP
   import answers 409 when the queue will not take another one, so a 409 there
   is a queue conflict by construction. This matters: the one 409 we have

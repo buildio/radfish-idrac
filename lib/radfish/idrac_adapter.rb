@@ -706,7 +706,12 @@ module Radfish
     #
     # Commands that are NOT wrapped are unaffected: a power action answers 409 for "the host is
     # already in that state", and nothing routes it through here.
-    CONFLICT_STATUS = /\b409\b/
+    CONFLICT_STATUS = 409
+
+    # Fallback for an older idrac gem. IDRAC::Error carries #status as data (idrac >= the release
+    # that adds it); before that the status existed only inside the message, so read it from there
+    # rather than losing the recovery to version skew. Prefer the attribute whenever it is set.
+    CONFLICT_STATUS_IN_MESSAGE = /\b409\b/
 
     # Secondary signal only, never the gate. An SCP import can report the conflict in its
     # { status: :failed, error: } result instead of raising, and that text may carry Dell's wording
@@ -767,15 +772,19 @@ module Radfish
     end
 
     # True when +outcome+ is a job-queue conflict, whether it arrived as a raised error or as the
-    # { status: :failed, error: } hash an SCP import returns instead of raising. A 409 is enough on
-    # its own (see CONFLICT_STATUS); the known wordings catch the result-hash form that reports the
-    # conflict without a status code.
+    # { status: :failed, error: } hash an SCP import returns instead of raising.
+    #
+    # A 409 is enough on its own (see CONFLICT_STATUS). It is read as DATA off the error when the
+    # idrac gem provides it, from the message only as a fallback, and the known wordings are the
+    # last resort for the result-hash form, which carries no status at all.
     def job_queue_conflict?(outcome)
+      return true if outcome.respond_to?(:status) && outcome.status.to_i == CONFLICT_STATUS
+
       text = case outcome
              when StandardError then outcome.message
              when Hash then outcome[:status] == :failed ? "#{outcome[:error]} #{outcome[:message]}" : nil
              end.to_s
-      text.match?(CONFLICT_STATUS) || text.match?(JOB_QUEUE_MESSAGES)
+      text.match?(CONFLICT_STATUS_IN_MESSAGE) || text.match?(JOB_QUEUE_MESSAGES)
     end
 
     def capture_failure
